@@ -160,6 +160,10 @@ npm run match -- --minutes 30  # a single match with a scoreboard
 # these two drive a real Chrome, and need: npm i --no-save puppeteer-core
 npm run smoke                  # load, lobby, start, walk, HUD
 npm run multiplayer            # two browsers, the real relay, one real match
+
+# talks to a relay from the command line, no dependencies, runs anywhere
+node tools/relay-probe.mjs --room TEST --role host
+node tools/relay-probe.mjs --room TEST --role guest --say hello
 ```
 
 The suite covers the geodesy against real-world distances, every rule in the engine, the blackout
