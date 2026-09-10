@@ -131,7 +131,9 @@ export function createHud(els, { onUseItem }) {
   }
 
   function describe(e, view) {
-    const name = (id) => view.players.find((p) => p.id === id)?.name || 'someone';
+    // Names come from other people's devices and land in innerHTML, so they
+    // are escaped at the point of use rather than trusted at the point of entry.
+    const name = (id) => escapeHtml(view.players.find((p) => p.id === id)?.name || 'someone');
     switch (e.type) {
       case 'pulse': return `Pulse ${e.n} swept the field`;
       case 'caught': return `${name(e.who)} was caught by ${name(e.by)}`;

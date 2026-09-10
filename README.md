@@ -78,7 +78,7 @@ context, so use `localhost` or https.
 
 ```bash
 npm run serve        # http://localhost:8080
-npm test             # 103 tests, no dependencies
+npm test             # 109 tests, no dependencies
 ```
 
 **Deploying:** push to a branch and turn on GitHub Pages. There is no build step — what is in the
@@ -134,8 +134,9 @@ npm run multiplayer            # two browsers, real WebRTC, one real match
 
 The suite covers the geodesy against real-world distances, every rule in the engine, the blackout
 ledger, fog-of-war leaks, determinism and replay, 20,000 rounds of hostile input, whole bot matches
-including a twelve-player game, the wire protocol, reconnection, and the PWA's own integrity (a
-precached path that no longer exists is the classic silent deploy failure).
+including a twelve-player game, the wire protocol, reconnection, escaping of names that arrived from
+someone else's phone, and the PWA's own integrity (a precached path that no longer exists is the
+classic silent deploy failure).
 
 The two browser tests earn their keep. Between them they caught an invisible
 full-screen overlay that was swallowing every tap on the game screen, a toast
