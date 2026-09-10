@@ -48,7 +48,14 @@ async function phone(label) {
   await page.setViewport({ width: 412, height: 892, isMobile: true, hasTouch: true });
   await page.setGeolocation({ latitude: 51.5074, longitude: -0.1278, accuracy: 8 });
   page.on('pageerror', (e) => problems.push(`${label} pageerror: ${e.message}`));
-  page.on('console', (m) => { if (m.type() === 'error') problems.push(`${label} console: ${m.text()}`); });
+  page.on('console', (m) => {
+    // "Failed to load resource" duplicates the requestfailed handler below and
+    // is expected on a flaky link now the worker fetches network-first: it
+    // falls back to the cache and the app carries on.
+    if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) {
+      problems.push(`${label} console: ${m.text()}`);
+    }
+  });
   await page.goto(BASE, { waitUntil: 'networkidle2', timeout: 45000 });
   return page;
 }

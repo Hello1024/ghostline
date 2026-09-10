@@ -46,7 +46,11 @@ try {
   await page.setViewport({ width: 412, height: 892, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 
   page.on('console', (msg) => {
-    if (msg.type() === 'error') problems.push(`console: ${msg.text()}`);
+    // "Failed to load resource" duplicates the requestfailed handler and is
+    // expected on a flaky link now the worker fetches network-first.
+    if (msg.type() === 'error' && !/Failed to load resource/.test(msg.text())) {
+      problems.push(`console: ${msg.text()}`);
+    }
   });
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
   page.on('requestfailed', (req) => {

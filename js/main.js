@@ -729,6 +729,11 @@ if ('serviceWorker' in navigator) {
   let reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadController || reloading) return;
+    // Never mid-match: someone is standing in a field with a phone, and losing
+    // their screen to save them a tap is not a trade worth making. The new
+    // files are already in place; they will be picked up next time the app
+    // opens, which for a player is after the game.
+    if (app.screen === 'game') return;
     reloading = true;
     location.reload();
   });
