@@ -174,3 +174,38 @@ start a game. It is one small service behind Apache with `Restart=always`, the a
 it cannot reach it, and anyone can point at their own in Connection settings — but it is a real
 trade, made deliberately, because a game that always works through a server beats a game that
 sometimes works without one.
+
+
+## Updates have to reach installed apps
+
+The service worker cached the app shell and served it cache-first, refreshing in the background. It
+is the strategy every tutorial shows, and for this app it was wrong.
+
+The symptom was an updated `index.html` loading against a stale `main.js` — a page that no longer
+loads a library calling into a module that still expects it. `Peer is not defined`. Every automated
+test passed, because they all ran in fresh browsers with empty caches; only someone who already had
+the app installed could see it.
+
+Two things were broken:
+
+1. **Cache-first plus background refresh gives you a mixed app.** Each file catches up on its own
+   schedule, so there is a window — exactly one reload wide — where some files are new and some are
+   old. That window is where the app breaks.
+2. **The usual remedy does not work here.** Normally you bump a version constant in `sw.js` so the
+   browser reinstalls the worker and rebuilds the cache atomically. But this project deliberately
+   has no build step, so an ordinary deploy leaves `sw.js` byte-identical, no reinstall happens, and
+   the old cache lives for ever. Correctness cannot depend on a human remembering to edit one file.
+
+So the app shell is network-first, revalidating with the server (`cache: 'no-cache'`, so unchanged
+files cost a 304), and falls back to the cache **only when the network actually fails**. That last
+detail is what keeps it consistent: if one file comes from the cache then the network is gone and
+they all do, and the cache only ever holds one install's worth of files. Vendored libraries and
+icons stay cache-first — they are the big ones and they do not change without changing their names.
+
+The page also reloads itself once if a new worker takes over a page an old one was controlling,
+which is what heals a browser that already has a broken version installed.
+
+`tools/update-check.mjs` is the regression test, and it is worth describing because getting it wrong
+is easy: it installs the app, edits the site underneath it, and reloads **once**. Reloading twice
+lets the background refresh catch up and the bug disappears — which is precisely why it survived
+until someone hit it in real life.

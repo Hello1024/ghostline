@@ -10,10 +10,32 @@
  * about resilience, not offline play.
  */
 
-const VERSION = 'ghostline-v1';
+const VERSION = 'ghostline-v3';
 const SHELL = `${VERSION}-shell`;
 const TILES = `${VERSION}-tiles`;
 const MAX_TILES = 600;
+
+/**
+ * Files that make up the running app. These are fetched from the network
+ * first, every load, and only fall back to the cache when the network is
+ * genuinely unavailable.
+ *
+ * That is deliberate, and it is the second attempt. The first version served
+ * these from the cache and refreshed in the background, which meant an updated
+ * page could load against stale modules — new index.html, old main.js — and
+ * the app simply broke. The usual fix is to bump a version string in this file
+ * so the worker reinstalls, but this project has no build step, so an ordinary
+ * deploy leaves sw.js byte-identical and no reinstall ever happens. Freshness
+ * therefore cannot depend on anyone remembering to edit this file.
+ *
+ * Falling back only on a real network failure is what keeps it consistent: if
+ * one file comes from the cache, they all do, and the cache only ever holds a
+ * single install's worth of files.
+ */
+const SHELL_PATTERN = /\.(?:html|js|mjs|css|webmanifest)$/i;
+
+/** Big, stable, and safe to serve from the cache: vendored libraries and icons. */
+const IMMUTABLE_PATTERN = /^\/?(?:vendor|icons)\//i;
 
 const PRECACHE = [
   './',
@@ -75,25 +97,69 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Signalling and peer traffic must never be served from a cache.
+  // The relay and anything else off-origin must never be served from a cache.
   if (url.origin !== self.location.origin) return;
 
-  event.respondWith((async () => {
-    const cached = await caches.match(request, { ignoreSearch: url.pathname.endsWith('.html') || url.pathname === '/' });
-    if (cached) {
-      // Refresh in the background so the next launch is current.
-      event.waitUntil(refresh(request));
-      return cached;
-    }
-    try {
-      return await fetch(request);
-    } catch {
-      const shell = await caches.match('./index.html');
-      if (shell && request.mode === 'navigate') return shell;
-      throw new Error('offline');
-    }
-  })());
+  const path = url.pathname.replace(self.location.pathname.replace(/[^/]*$/, ''), '/');
+  if (IMMUTABLE_PATTERN.test(path)) {
+    event.respondWith(cacheFirst(request, event));
+    return;
+  }
+
+  const isShell = request.mode === 'navigate'
+    || SHELL_PATTERN.test(url.pathname)
+    || url.pathname.endsWith('/');
+  event.respondWith(isShell ? networkFirst(request) : cacheFirst(request, event));
 });
+
+/**
+ * Network first. `no-cache` revalidates with the server rather than trusting a
+ * max-age, so a 304 is cheap and a changed file is never missed.
+ */
+async function networkFirst(request) {
+  try {
+    const fresh = await fetch(new Request(request.url, {
+      cache: 'no-cache',
+      credentials: 'same-origin',
+      redirect: 'follow',
+    }));
+    if (fresh && fresh.ok) {
+      const copy = fresh.clone();
+      caches.open(SHELL).then((c) => c.put(request, copy)).catch(() => {});
+      return fresh;
+    }
+    // A 404 or 500 is a real answer; do not paper over it with a stale file.
+    if (fresh && fresh.status >= 400 && fresh.status < 500) return fresh;
+  } catch {
+    // Offline. Everything below comes from one install, so it stays consistent.
+  }
+  const cached = await caches.match(request, { ignoreSearch: true });
+  if (cached) return cached;
+  if (request.mode === 'navigate') {
+    const shell = await caches.match('./index.html', { ignoreSearch: true });
+    if (shell) return shell;
+  }
+  return new Response('Offline and not cached.', { status: 503, headers: { 'content-type': 'text/plain' } });
+}
+
+/** Cache first, for things that do not change without changing their name. */
+async function cacheFirst(request, event) {
+  const cached = await caches.match(request, { ignoreSearch: false });
+  if (cached) {
+    event.waitUntil(refresh(request));
+    return cached;
+  }
+  try {
+    const fresh = await fetch(request);
+    if (fresh && fresh.ok) {
+      const copy = fresh.clone();
+      caches.open(SHELL).then((c) => c.put(request, copy)).catch(() => {});
+    }
+    return fresh;
+  } catch {
+    return new Response('Offline and not cached.', { status: 503, headers: { 'content-type': 'text/plain' } });
+  }
+}
 
 async function refresh(request) {
   try {

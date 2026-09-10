@@ -160,6 +160,7 @@ npm run match -- --minutes 30  # a single match with a scoreboard
 # these two drive a real Chrome, and need: npm i --no-save puppeteer-core
 npm run smoke                  # load, lobby, start, walk, HUD
 npm run multiplayer            # two browsers, the real relay, one real match
+npm run update-check           # does a deploy actually reach an installed app?
 
 # talks to a relay from the command line, no dependencies, runs anywhere
 node tools/relay-probe.mjs --room TEST --role host
@@ -173,7 +174,13 @@ rate limits, room capacity, host reconnection), reconnection, escaping of names 
 someone else's phone, and the PWA's own integrity (a precached path that no longer exists is the
 classic silent deploy failure).
 
-The two browser tests earn their keep. Between them they caught an invisible
+`npm run update-check` deserves its own mention. It installs the app in a real browser, changes the
+site underneath it, reloads once, and checks the browser is running *one* version. That catches the
+worst class of bug this project can have: a service worker serving stale modules to an updated page,
+which breaks the app for everyone who already has it installed while every other test — run against
+a fresh browser — passes happily.
+
+The browser tests earn their keep. Between them they caught an invisible
 full-screen overlay that was swallowing every tap on the game screen, a toast
 that covered the start button, a thumbstick that threw on desktop, a charge
 readout clipped by its own container, and — the worst of them — a networked

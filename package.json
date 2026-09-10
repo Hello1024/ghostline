@@ -14,7 +14,8 @@
     "serve": "node tools/serve.mjs",
     "smoke": "node tools/smoke.mjs",
     "multiplayer": "node tools/multiplayer.mjs",
-    "relay": "node server/relay.mjs"
+    "relay": "node server/relay.mjs",
+    "update-check": "node tools/update-check.mjs"
   },
   "engines": {
     "node": ">=20"

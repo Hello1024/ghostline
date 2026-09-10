@@ -721,8 +721,21 @@ async function describeConnection() {
 }
 
 if ('serviceWorker' in navigator) {
+  // If a worker was already in charge and a new one takes over, the page is
+  // now running against files the new worker may have replaced. Reload once so
+  // the whole app comes from one version — a half-updated app is how you end
+  // up with a new page calling into modules that no longer exist.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    location.reload();
+  });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => { /* offline support is a bonus */ });
+    navigator.serviceWorker.register('sw.js')
+      .then((reg) => reg.update().catch(() => {}))
+      .catch(() => { /* offline support is a bonus, not a requirement */ });
   });
 }
 

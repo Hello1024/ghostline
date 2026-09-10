@@ -11,7 +11,8 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+// SERVE_ROOT lets tools/update-check.mjs serve a throwaway copy of the site.
+const ROOT = process.env.SERVE_ROOT || join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 8080;
 
 const TYPES = {
