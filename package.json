@@ -1,0 +1,19 @@
+{
+  "name": "ghostline",
+  "version": "1.0.0",
+  "description": "Hide and seek across a real square mile \u2014 a location-based multiplayer PWA with no backend.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "icons": "node tools/make-icons.mjs",
+    "balance": "node tools/balance.mjs 20",
+    "trace": "node tools/trace.mjs",
+    "match": "node test/harness.mjs",
+    "serve": "node tools/serve.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
