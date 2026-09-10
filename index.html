@@ -83,24 +83,22 @@
 <section class="screen" id="screen-net" data-screen="net" hidden>
   <header class="bar"><button class="btn icon" data-back>←</button><h2>Connection</h2></header>
   <div class="scroll pad prose">
-    <p>Phones connect directly to each other. On the same wifi that always works. Across
-      networks — one on mobile data, one at home — they need a little help finding a route.</p>
-    <button class="btn" id="btn-test-ice">Test this device's connectivity</button>
-    <pre class="result" id="ice-result" hidden></pre>
+    <p>Everyone connects through a relay, so it does not matter whose network anyone is on —
+      mobile data, home wifi, a friend's, all fine.</p>
+    <button class="btn" id="btn-test-relay">Test the connection</button>
+    <pre class="result" id="relay-result" hidden></pre>
 
-    <h3>Relay server (optional)</h3>
-    <p>Some mobile networks will not allow a direct connection at all. A TURN relay fixes that.
-      There is no free public one worth relying on, so if you hit this you will need your own —
-      a free tier from a TURN provider, or your own <code>coturn</code>. Whoever hosts the game
-      should set it; everyone else can leave it blank.</p>
-    <label class="field"><span>TURN URL</span>
-      <input type="text" id="turn-url" placeholder="turn:example.com:3478" autocapitalize="off" spellcheck="false"></label>
-    <label class="field"><span>Username</span>
-      <input type="text" id="turn-user" autocapitalize="off" spellcheck="false"></label>
-    <label class="field"><span>Password</span>
-      <input type="text" id="turn-pass" autocapitalize="off" spellcheck="false"></label>
-    <button class="btn primary" id="btn-save-turn">Save</button>
-    <p class="footnote">Stored only on this device.</p>
+    <h3>Relay</h3>
+    <p>Everyone's phone connects to one small server that passes messages between them. Nothing
+      about the game happens there — one player's phone is still in charge, and still only tells
+      each player what they are allowed to know.</p>
+    <label class="field"><span>Relay address</span>
+      <input type="text" id="relay-url" autocapitalize="off" spellcheck="false"
+             autocomplete="off" placeholder="wss://omattos.com/ghostline/ws"></label>
+    <button class="btn primary" id="btn-save-relay">Save</button>
+    <button class="btn" id="btn-reset-relay">Use the default</button>
+    <p class="footnote">Stored only on this device. Change it if you run your own —
+      <code>server/relay.mjs</code> in the repository is the whole thing.</p>
   </div>
 </section>
 
@@ -231,7 +229,6 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="vendor/leaflet/leaflet.js"></script>
-<script src="vendor/peerjs.min.js"></script>
 <script src="vendor/qrcode.js"></script>
 <script type="module" src="js/main.js"></script>
 </body>

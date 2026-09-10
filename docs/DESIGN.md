@@ -132,3 +132,45 @@ the one-shot promise that waits for the peer to open. So it fired into a promise
 settled, and the client sat on "Connecting…" for ever without retrying. Peer-level errors are now
 handled for the life of the session, a connection that never opens is treated as a failure worth
 retrying, and every error has a sentence a person can act on.
+
+
+## Why there is a server now
+
+The game shipped peer-to-peer over WebRTC, which is the obvious design for something with no
+backend: two phones, a direct connection, nothing in between. It did not work.
+
+The failure is structural, not a bug. WebRTC needs a route between two devices. Two phones on one
+wifi have one. A phone on mobile data and a phone at home often do not, because carrier-grade NAT
+is frequently symmetric, and no amount of STUN will get through it. The standard answer is a TURN
+relay — a server that both ends can reach, which forwards the traffic.
+
+Which is the point worth noticing: **the fix for peer-to-peer not working is a server.** Given that,
+a relay that forwards JSON is simpler than a relay that forwards media streams, easier to reason
+about, and easier to run. So the WebRTC layer went, and `server/relay.mjs` replaced it.
+
+What the relay is:
+
+- A switchboard. Rooms keyed by lobby code, one host per room, messages forwarded between them.
+- Ignorant of the game. It never parses a game message; it moves strings.
+- Zero dependencies. The box has node and no npm, and a service that runs unattended for years is
+  better off with nothing to update. The WebSocket framing is therefore hand-rolled, which means
+  masking and continuation frames had to be handled properly — browsers produce both.
+- Bounded. Message size, messages per second, guests per room, rooms in total, connections per IP,
+  and an idle timeout. A public endpoint is a public resource.
+
+What did not change: the host still owns the world, and still sends each player only their
+fog-of-war view. The relay carries what the host was already willing to send, so it learns nothing
+a player could not have learned, and a compromised relay is no worse than a curious player.
+
+The nice side effect is that reconnection got much better. A phone that sleeps, changes network or
+goes into a tunnel now just reopens a socket and says who it is; the host recognises the player id
+and hands back their game. Under WebRTC that was a fresh NAT traversal with everything that could go
+wrong with one.
+
+### One thing to watch
+
+A relay is a single point of failure in a way that peer-to-peer was not: if it is down, nobody can
+start a game. It is one small service behind Apache with `Restart=always`, the app says plainly when
+it cannot reach it, and anyone can point at their own in Connection settings — but it is a real
+trade, made deliberately, because a game that always works through a server beats a game that
+sometimes works without one.

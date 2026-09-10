@@ -3,8 +3,8 @@
 Hide and seek, played across a real square mile.
 
 A location-based multiplayer game for about seven people and half an hour. It installs to a phone
-like an app, runs from static hosting, and has **no backend at all** — devices talk to each other
-directly over WebRTC.
+like an app and runs from static hosting. One player's phone runs the whole game; the others talk to
+it through a small relay, so it does not matter whose network anyone is on.
 
 **Play it:** https://hello1024.github.io/ghostline/
 
@@ -83,26 +83,34 @@ context, so use `localhost` or https.
 
 ```bash
 npm run serve        # http://localhost:8080
-npm test             # 118 tests, no dependencies
+npm test             # 136 tests, no dependencies
 ```
 
 **Deploying:** push to a branch and turn on GitHub Pages. There is no build step — what is in the
 repo is what ships.
 
-### Connecting across networks
+### How devices talk to each other
 
-Phones talk directly to each other. On one wifi that always works. Across networks — one player on
-mobile data, another at home — WebRTC needs help finding a route, and the app ships a set of public
-STUN servers that were each checked to answer.
+One player's phone is the host: it runs the entire game and sends every other player a view of the
+world containing only what they are allowed to see. The other phones send it their position and what
+they'd like to do.
 
-STUN is enough for most home routers. Some mobile carriers use a NAT that allows no direct path at
-all, and those need a TURN relay. There is no free public TURN worth relying on any more — the
-well-known open relays now refuse the credentials they publish — so if you hit this, **Connection
-settings** on the home screen takes your own TURN URL and credentials (a provider's free tier, or
-your own `coturn`). Only whoever hosts needs to set it.
+Those messages go through a **relay** — a small WebSocket server whose only job is to pass messages
+between the phones in a room. It understands nothing about the game, holds no state beyond who is
+connected, and cannot see anything the host would not have sent anyway.
 
-That screen also has a **connectivity test** that says, in plain words, what this device can reach.
-Run it before you take seven people outside, not after.
+The whole thing is `server/relay.mjs`: about 380 lines, no dependencies, run it with
+`node server/relay.mjs --port 8787`. Put it behind whatever already terminates TLS for you — the
+repo's Apache setup is two `ProxyPass` lines. Point the app at your own with **Connection settings**
+on the home screen, which also has a test that tells you whether the relay is up and whether this
+network lets WebSockets through.
+
+> **Why not peer-to-peer?** It was, over WebRTC, and it did not work reliably. Two phones on
+> different networks need a route between them, and mobile carriers using symmetric NAT do not
+> provide one. The usual answer is a TURN relay — at which point you are running a server anyway,
+> so it may as well be a simple one you can read in a sitting. A relay also survives the things
+> phones actually do: sleep, change network, walk into a tunnel. Reconnection is a socket reopening,
+> not a NAT traversal negotiated from scratch.
 
 **Practice mode** runs a whole match against six bots inside one phone, with a thumbstick instead
 of GPS. It needs no network at all and is the fastest way to learn the interface before taking
@@ -117,7 +125,8 @@ js/engine/     the rules — pure, DOM-free, deterministic
    constants     every balance dial, in one place
    engine.js     applyIntent() and step(): the entire simulation
    view.js       fog of war — what each player is allowed to know
-js/net/        host-authoritative star topology over WebRTC
+js/net/        host-authoritative star topology over a WebSocket relay
+server/        the relay itself: ~380 lines, no dependencies
 js/geo/        GPS, a simulated walker, and the presence detector
 js/ui/         Leaflet for tiles, a canvas overlay for the game
 js/bots/       bot brains, shared by practice mode and the tests
@@ -130,7 +139,8 @@ randomness. A thirty-minute match runs headlessly in about a second, the same se
 the same match, and a disputed game can be replayed from its intent log.
 
 **The host never broadcasts the world.** Each player is sent only their own fog-of-war view, so
-opening devtools shows you nothing your screen was not already showing. `js/engine/view.js` is
+opening devtools shows you nothing your screen was not already showing — and neither the relay nor
+anyone watching it ever sees more than that. `js/engine/view.js` is
 treated as a security boundary, and the tests walk the entire serialised view looking for any
 coordinate belonging to someone who should be hidden.
 
@@ -142,19 +152,20 @@ view contains enough to play the game, and if a bot could cheat, so could a pers
 ## Testing
 
 ```bash
-npm test                       # unit, integration, fuzz, PWA integrity
+npm test                       # unit, integration, fuzz, relay, PWA integrity
 npm run balance -- 40          # play 40 bot matches, report the outcome spread
 npm run trace                  # one match, minute by minute
 npm run match -- --minutes 30  # a single match with a scoreboard
 
 # these two drive a real Chrome, and need: npm i --no-save puppeteer-core
 npm run smoke                  # load, lobby, start, walk, HUD
-npm run multiplayer            # two browsers, real WebRTC, one real match
+npm run multiplayer            # two browsers, the real relay, one real match
 ```
 
 The suite covers the geodesy against real-world distances, every rule in the engine, the blackout
 ledger, fog-of-war leaks, determinism and replay, 20,000 rounds of hostile input, whole bot matches
-including a twelve-player game, the wire protocol, reconnection, escaping of names that arrived from
+including a twelve-player game, the wire protocol, the relay (routing, fragmented and masked frames,
+rate limits, room capacity, host reconnection), reconnection, escaping of names that arrived from
 someone else's phone, and the PWA's own integrity (a precached path that no longer exists is the
 classic silent deploy failure).
 

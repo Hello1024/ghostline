@@ -13,7 +13,8 @@
     "match": "node test/harness.mjs",
     "serve": "node tools/serve.mjs",
     "smoke": "node tools/smoke.mjs",
-    "multiplayer": "node tools/multiplayer.mjs"
+    "multiplayer": "node tools/multiplayer.mjs",
+    "relay": "node server/relay.mjs"
   },
   "engines": {
     "node": ">=20"

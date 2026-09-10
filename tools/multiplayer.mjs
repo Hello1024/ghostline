@@ -105,11 +105,26 @@ try {
     if (!/\d/.test(hud.clock)) problems.push(`${label} clock is not running`);
   }
 
-  // The guest holds no authority at all: everything it draws came over WebRTC.
-  // There is deliberately little to draw — in a two-player match the one ghost
-  // is hidden, which is the system working — so this only asks whether the
-  // guest is painting a world at all. Leak-proofing is covered properly by the
-  // fog-of-war unit tests, which scan the whole serialised view.
+  log('dropping the guest off the network, then bringing it back');
+  await guest.setOfflineMode(true);
+  await new Promise((r) => setTimeout(r, 3500));
+  const whileDown = await guest.$eval('#hud-clock', (e) => e.textContent);
+  await guest.setOfflineMode(false);
+  // The relay's own backoff is up to 8s, plus a beat to catch up.
+  await new Promise((r) => setTimeout(r, 14000));
+  const afterUp = await guest.evaluate(() => ({
+    clock: document.getElementById('hud-clock').textContent,
+    onGame: !document.getElementById('screen-game').hidden,
+  }));
+  log(`clock while offline ${whileDown} -> after reconnect ${afterUp.clock}`);
+  if (!afterUp.onGame) problems.push('the guest fell out of the match when the network dropped');
+  if (afterUp.clock === whileDown) problems.push('the guest never resumed after reconnecting');
+
+  // The guest holds no authority at all: everything it draws arrived over the
+  // relay. There is deliberately little to draw — in a two-player match the one
+  // ghost is hidden, which is the system working — so this only asks whether
+  // the guest is painting a world at all. Leak-proofing is covered properly by
+  // the fog-of-war unit tests, which scan the whole serialised view.
   const lit = await guest.evaluate(() => {
     const c = document.getElementById('overlay');
     const { data } = c.getContext('2d').getImageData(0, 0, c.width, c.height);

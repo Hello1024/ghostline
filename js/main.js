@@ -16,12 +16,11 @@ import * as geo from './engine/geo.js';
 import { createHost } from './net/host.js';
 import { createClient } from './net/client.js';
 import { createLocalPair } from './net/transport-local.js';
-import { createPeerHost, createPeerClient } from './net/transport-peer.js';
+import { createRelayHost, createRelayClient, relayUrl, saveRelayUrl, relayHealth, defaultRelay } from './net/transport-ws.js';
 import { createGpsLocator, createSimLocator } from './geo/locator.js';
 import { createPresence } from './geo/presence.js';
 import { createGameMap } from './ui/map.js';
 import { createAreaPicker, describeArea } from './ui/areapicker.js';
-import { iceServers, savedTurn, saveTurn } from './net/transport-peer.js';
 import { createHud, renderScoreboard, escapeHtml, mmss } from './ui/hud.js';
 import { newBrain, decide, walk } from './bots/bot.js';
 
@@ -199,9 +198,9 @@ async function startHosting() {
   el('create-err').textContent = '';
   let transport;
   try {
-    transport = await createPeerHost(code, { onStatus: (s) => toast(s) });
+    transport = await createRelayHost(code, { playerId: playerId(), onStatus: (msg) => toast(msg) });
   } catch (err) {
-    el('create-err').textContent = `Could not reach the matchmaking server: ${err.message}. Practice mode works offline.`;
+    el('create-err').textContent = `Could not reach the relay: ${err.message} Practice mode works without it.`;
     return;
   }
   const host = createHost({
@@ -230,7 +229,11 @@ async function joinGame() {
   el('join-err').textContent = '';
   let transport;
   try {
-    transport = await createPeerClient(code, { onStatus: (s) => toast(s) });
+    transport = await createRelayClient(code, {
+      playerId: playerId(),
+      onStatus: (msg) => toast(msg),
+      onLink: (up) => { if (!up) toast('Connection dropped — reconnecting…'); },
+    });
   } catch (err) {
     el('join-err').textContent = `Could not connect: ${err.message}`;
     return;
@@ -621,80 +624,63 @@ function reallyStart() {
 // ----------------------------------------------------------- connection --
 
 function wireNetScreen() {
-  const turn = savedTurn();
-  if (turn) {
-    el('turn-url').value = turn.urls;
-    el('turn-user').value = turn.username;
-    el('turn-pass').value = turn.credential;
-  }
-  el('btn-save-turn').addEventListener('click', () => {
-    const urls = el('turn-url').value.trim();
-    if (urls && !/^turns?:/i.test(urls)) {
-      toast('A TURN URL starts with turn: or turns:');
+  el('relay-url').value = relayUrl();
+  el('relay-url').placeholder = defaultRelay();
+  el('btn-save-relay').addEventListener('click', () => {
+    const url = el('relay-url').value.trim();
+    if (url && !/^wss?:\/\//i.test(url)) {
+      toast('A relay address starts with wss://');
       return;
     }
-    saveTurn(urls ? { urls, username: el('turn-user').value.trim(), credential: el('turn-pass').value.trim() } : null);
-    toast(urls ? 'Relay saved — it applies to the next game you start or join' : 'Relay cleared');
+    saveRelayUrl(url === defaultRelay() ? null : url);
+    el('relay-url').value = relayUrl();
+    toast(url ? 'Relay saved' : 'Back to the default relay');
   });
-  el('btn-test-ice').addEventListener('click', testConnectivity);
+  el('btn-reset-relay').addEventListener('click', () => {
+    saveRelayUrl(null);
+    el('relay-url').value = relayUrl();
+    toast('Back to the default relay');
+  });
+  el('btn-test-relay').addEventListener('click', testRelay);
 }
 
 /**
- * Gather ICE candidates and say, in plain words, what this device can reach.
- * "It doesn't connect" is a miserable thing to debug from a car park, so the
- * app should be able to answer it on its own.
+ * "It won't connect" should be answerable from the car park, so the app asks
+ * the relay directly and says what it found.
  */
-async function testConnectivity() {
-  const out = el('ice-result');
+async function testRelay() {
+  const out = el('relay-result');
   out.hidden = false;
   out.textContent = 'Testing…';
-  if (typeof RTCPeerConnection !== 'function') {
-    out.textContent = 'This browser cannot do peer-to-peer connections at all.';
-    return;
-  }
-  const servers = iceServers();
-  const types = new Set();
-  const errors = new Set();
-  let pc;
+  const url = relayUrl();
+  const lines = [`Relay   ${url}`];
+  const started = Date.now();
   try {
-    pc = new RTCPeerConnection({ iceServers: servers });
-    pc.createDataChannel('probe');
-    pc.onicecandidate = (e) => {
-      const m = e.candidate && /typ (\w+)/.exec(e.candidate.candidate);
-      if (m) types.add(m[1]);
-    };
-    pc.onicecandidateerror = (e) => {
-      if (e.errorCode !== 701 || e.url) errors.add(`${e.url || 'server'}: ${e.errorCode}`);
-    };
-    await pc.setLocalDescription(await pc.createOffer());
-    await new Promise((done) => {
-      const timer = setTimeout(done, 12000);
-      pc.onicegatheringstatechange = () => {
-        if (pc.iceGatheringState === 'complete') { clearTimeout(timer); done(); }
-      };
-    });
+    const health = await relayHealth(url);
+    lines.push(`Status  up — ${health.rooms} game${health.rooms === 1 ? '' : 's'} in progress`, `        answered in ${Date.now() - started}ms`);
   } catch (err) {
-    out.textContent = `Could not test: ${err.message}`;
+    lines.push(`Status  UNREACHABLE — ${err.message}`, '',
+      'The relay is down or this network is blocking it.');
+    out.textContent = lines.join('\n');
     return;
-  } finally {
-    try { pc?.close(); } catch { /* nothing to close */ }
   }
 
-  const hasTurn = servers.some((sv) => /^turns?:/i.test([].concat(sv.urls)[0] || ''));
-  const lines = [
-    `This network        ${types.has('host') ? 'reachable' : 'NOT reachable'}`,
-    `Public address      ${types.has('srflx') ? 'found — other networks can reach you' : 'NOT found — you may only manage same-wifi games'}`,
-    `Relay               ${types.has('relay') ? 'working' : (hasTurn ? 'configured but NOT working' : 'not configured')}`,
-  ];
-  if (!types.has('srflx')) {
-    lines.push('', 'A firewall is blocking the address lookup. Try mobile data, or a different network.');
-  } else if (!types.has('relay')) {
-    lines.push('', 'Good enough for most networks. If a particular phone still cannot join,',
-      'that network needs a relay — add one above.');
-  } else {
-    lines.push('', 'This device can connect from anywhere.');
+  // The health check is an ordinary request; the game needs a live socket.
+  lines.push('');
+  try {
+    await new Promise((resolve, reject) => {
+      const probe = new WebSocket(`${url}?room=TEST&role=guest&id=probe-${Math.random().toString(36).slice(2, 8)}`);
+      const timer = setTimeout(() => { probe.close(); reject(new Error('no reply within 10s')); }, 10000);
+      probe.addEventListener('message', () => { clearTimeout(timer); probe.close(); resolve(); });
+      probe.addEventListener('error', () => { clearTimeout(timer); reject(new Error('the socket was refused')); });
+      probe.addEventListener('close', () => { clearTimeout(timer); reject(new Error('the socket closed immediately')); });
+    });
+    lines.push('Socket  open — this device can host and join games.');
+  } catch (err) {
+    lines.push(`Socket  BLOCKED — ${err.message}`, '',
+      'Ordinary requests get through but WebSockets do not. Some corporate and',
+      'public wifi does this. Mobile data usually works.');
   }
-  if (errors.size) lines.push('', `Servers that did not answer: ${[...errors].join(', ')}`);
   out.textContent = lines.join('\n');
 }
 
