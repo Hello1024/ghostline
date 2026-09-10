@@ -50,9 +50,9 @@ Twenty bot matches, seven players, two hunters, thirty minutes:
 | | |
 | --- | --- |
 | Ghosts survive / hunters sweep | 19 / 1 |
-| Ghosts still free at the end | mean 2.75 of 5 (p10 1, p90 4) |
-| First catch | median ~13 min |
-| Caches opened | ~38 per match |
+| Ghosts still free at the end | mean 2.65 of 5 (p10 1, p90 4) |
+| First catch | median ~18 min |
+| Caches opened | ~39 per match |
 
 Hunters take roughly two of five, with real variance. A clean sweep is rare, which feels right —
 sweeping five hiders across a square mile *should* be an achievement.
@@ -87,3 +87,48 @@ hidden, so a leak anywhere in the structure fails, not only in the fields anyone
 
 The same discipline is why the bots read the view rather than the state. If a bot can play the game
 from the view, the view is sufficient; if a bot could cheat with it, so could a person with devtools.
+
+
+## The play area is a polygon
+
+It started as a square, which is wrong for the same reason a square is wrong for a football pitch on
+a hillside: real ground has edges. A river, a dual carriageway, a railway, the line past which you
+would rather nobody wandered. A boundary you have to explain out loud in a car park — "not past the
+big road, and not over the bridge" — should be the boundary the game enforces.
+
+So the area is any simple polygon, drawn on the map by tapping corners. The engine works in metres
+projected about the ring's own first vertex, which makes containment, area, centroid and the
+collapse all plain plane geometry, and is accurate to a fraction of a metre over a few kilometres.
+
+The awkward case is concavity. The notch of an L-shape sits inside the bounding box but outside the
+area, so anything that quietly falls back to a bounding box passes every square test and fails in
+the field. That is why the polygon tests are built on an L, and why they check caches, the collapse
+and the bots as well as the containment test itself.
+
+Two details worth keeping:
+
+- **Simplicity is checked before area.** A ring that crosses itself has no meaningful area — the
+  halves cancel — so a bow-tie would otherwise be reported as "too small", which tells the host
+  nothing about what is actually wrong.
+- **The collapse scales the ring about its centroid**, so the shape it closes into is the shape you
+  drew, only smaller. `zoneShrinkTo` is a linear scale, not an area fraction; the balance was tuned
+  against that reading and swapping the two quietly changes the endgame.
+
+## Getting a connection
+
+The first version shipped Google's STUN server and Twilio's. Measuring them in a real browser showed
+Twilio's was dead — and a dead ICE server is far worse than none, because gathering blocks on it for
+twelve seconds instead of finishing in under two hundred milliseconds. Everything in the list now
+has been checked to return a candidate.
+
+There is no usable free public TURN left. The open relay everyone cites now refuses the credentials
+it documents (error 400, allocation mismatch). Rather than ship something that looks like it works,
+TURN is optional and supplied by whoever hosts, with a connectivity test in the app that reports
+what this device can actually reach.
+
+The other half of "it does not connect" was ours. `peer-unavailable` — the error you get when the
+host is not there — arrives on the *peer*, not on the connection, and the only handler was inside
+the one-shot promise that waits for the peer to open. So it fired into a promise that had already
+settled, and the client sat on "Connecting…" for ever without retrying. Peer-level errors are now
+handled for the life of the session, a connection that never opens is treated as a failure worth
+retrying, and every error has a sentence a person can act on.

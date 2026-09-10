@@ -107,7 +107,11 @@ function sanitiseIntent(i) {
       // The engine clamps these; here we only insist it is a flat object.
       return { type: 'config', config: flatObject(i.config) };
     case 'area':
-      return { type: 'area', lat: num(i.lat), lon: num(i.lon), sizeM: num(i.sizeM) };
+      return {
+        type: 'area',
+        lat: num(i.lat), lon: num(i.lon), sizeM: num(i.sizeM),
+        polygon: ring(i.polygon),
+      };
     case 'setRole':
       return { type: 'setRole', target: isId(i.target) ? i.target : '', role: String(i.role || '').slice(0, 16) };
     case 'start':
@@ -120,6 +124,25 @@ function sanitiseIntent(i) {
     default:
       return { type: i.type };
   }
+}
+
+/**
+ * A play-area ring off the wire: at most MAX_RING points, each a plain pair of
+ * finite coordinates. The engine still judges whether the shape is playable;
+ * this only guarantees it is the right sort of object.
+ */
+const MAX_RING = 60;
+function ring(value) {
+  if (!Array.isArray(value)) return undefined;
+  const out = [];
+  for (const p of value.slice(0, MAX_RING)) {
+    const lat = num(p?.lat);
+    const lon = num(p?.lon);
+    if (lat === undefined || lon === undefined) continue;
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
+    out.push({ lat, lon });
+  }
+  return out;
 }
 
 /** Copy only own, primitive-valued keys - no prototypes, no nesting. */

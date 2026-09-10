@@ -17,7 +17,7 @@ import * as geo from './geo.js';
 import { ITEMS, canHold, rollLoot } from './items.js';
 import {
   addPlayer, all, active, ghosts, hunters, log, located,
-  spawnCaches, zoneBounds, areaBounds,
+  shapeFrom, spawnCaches, zonePolygon, areaPolygon,
 } from './state.js';
 
 const S = 1000;
@@ -84,17 +84,7 @@ export function applyIntent(state, playerId, intent, now = state.t) {
     case 'area': {
       if (!isHost(state, playerId)) return err('not-host');
       if (state.phase !== PHASE.LOBBY) return err('already-started');
-      if (!Number.isFinite(intent.lat) || !Number.isFinite(intent.lon)) return err('bad-area');
-      state.area.lat = intent.lat;
-      state.area.lon = intent.lon;
-      if (Number.isFinite(intent.sizeM)) {
-        const { min, max } = CONFIG_SCHEMA.areaSizeM;
-        const size = Math.min(max, Math.max(min, intent.sizeM));
-        state.config.areaSizeM = size;
-        state.area.sizeM = size;
-      }
-      state.zone = { ...state.area };
-      return ok();
+      return setArea(state, intent);
     }
     case 'setRole': {
       if (!isHost(state, playerId)) return err('not-host');
@@ -120,6 +110,53 @@ export function applyIntent(state, playerId, intent, now = state.t) {
       return err('unknown-intent');
   }
 }
+
+/**
+ * Adopt a play area. The shape may be any simple polygon the host drew; a bare
+ * centre still works and becomes a square of the configured size.
+ */
+function setArea(state, intent) {
+  let ring = Array.isArray(intent.polygon) ? intent.polygon : null;
+  if (!ring && Number.isFinite(intent.lat) && Number.isFinite(intent.lon)) {
+    const { min, max } = CONFIG_SCHEMA.areaSizeM;
+    const size = Number.isFinite(intent.sizeM)
+      ? Math.min(max, Math.max(min, intent.sizeM))
+      : state.config.areaSizeM;
+    state.config.areaSizeM = size;
+    ring = geo.squarePolygon({ lat: intent.lat, lon: intent.lon }, size);
+  }
+  const problem = polygonProblem(ring);
+  if (problem) return err(problem);
+  const shape = shapeFrom(ring);
+  state.area = shape;
+  state.zone = { ...shape, scale: 1 };
+  return ok();
+}
+
+/** Why this ring cannot be a play area, or null if it can. */
+export function polygonProblem(ring) {
+  if (!Array.isArray(ring) || ring.length < 3) return 'bad-area';
+  if (ring.length > MAX_VERTICES) return 'too-many-corners';
+  for (const p of ring) {
+    if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return 'bad-area';
+    if (Math.abs(p.lat) > 90 || Math.abs(p.lon) > 180) return 'bad-area';
+  }
+  // A shape that spans continents is a mistake, not a game.
+  if (geo.polygonPerimeter(ring) > 60000) return 'area-too-big';
+  // Simplicity comes first: a ring that crosses itself has no meaningful area
+  // to measure — the halves cancel — so it would otherwise be reported as too
+  // small, which tells the host nothing about what is actually wrong.
+  if (!geo.isSimplePolygon(ring)) return 'area-crosses-itself';
+  const areaM2 = geo.polygonArea(ring);
+  if (areaM2 < MIN_AREA_M2) return 'area-too-small';
+  if (areaM2 > MAX_AREA_M2) return 'area-too-big';
+  return null;
+}
+
+/** Bounds on a drawn area: small enough to walk, big enough to hide in. */
+export const MAX_VERTICES = 60;
+export const MIN_AREA_M2 = 40_000;         // 200m x 200m
+export const MAX_AREA_M2 = 25_000_000;     // 5km x 5km
 
 const ok = () => ({ ok: true });
 const err = (error) => ({ ok: false, error });
@@ -197,14 +234,14 @@ function useItem(state, p, intent, now) {
 function startGame(state, now, intent = {}) {
   const roster = active(state);
   if (roster.length < 2) return err('need-two-players');
-  if (!state.area.lat && !state.area.lon) return err('no-area');
+  if (!state.area.polygon || state.area.polygon.length < 3) return err('no-area');
   if (!hunters(state).length) return err('need-a-hunter');
   if (!ghosts(state).length) return err('need-a-ghost');
 
   state.phase = PHASE.SCATTER;
   state.startedAt = now;
   state.endsAt = now + state.config.durationS * S;
-  state.zone = { ...state.area, sizeM: state.config.areaSizeM };
+  state.zone = { ...state.area, scale: 1 };
   // Hunters are held near wherever the pack starts out.
   const anchor = located(roster)[0];
   state.start = intent.start || (anchor ? { lat: anchor.lat, lon: anchor.lon } : { lat: state.area.lat, lon: state.area.lon });
@@ -272,11 +309,18 @@ function advancePhase(state, now) {
 
 /** The zone shrinks steadily through the collapse phase. */
 function updateZone(state, now) {
-  const { collapseS, zoneShrinkTo, areaSizeM } = state.config;
+  const { collapseS, zoneShrinkTo } = state.config;
   if (!collapseS) return;
   const collapseAt = state.endsAt - collapseS * S;
   const progress = Math.max(0, Math.min(1, (now - collapseAt) / (collapseS * S)));
-  state.zone.sizeM = areaSizeM * (1 - (1 - zoneShrinkTo) * progress);
+  // `zoneShrinkTo` is a linear scale — each edge is pulled in to that fraction,
+  // so the area falls with its square. The balance was tuned against this.
+  const scale = 1 - (1 - zoneShrinkTo) * progress;
+  if (Math.abs(scale - state.zone.scale) < 1e-4) return;
+  const shrunk = geo.scalePolygon(state.area.polygon, scale, {
+    lat: state.area.lat, lon: state.area.lon,
+  });
+  state.zone = { ...shapeFrom(shrunk), scale };
 }
 
 function updatePlayer(state, p, now, dt) {
@@ -293,8 +337,7 @@ function updatePlayer(state, p, now, dt) {
   }
 
   // Out of bounds.
-  const b = zoneBounds(state);
-  const outside = p.lat != null && geo.distanceOutside(b, p) > 0;
+  const outside = p.lat != null && !geo.pointInPolygon(zonePolygon(state), p);
   if (outside && p.role !== ROLE.SPECTATOR) {
     if (!p.oobSince) {
       p.oobSince = now;
@@ -533,15 +576,15 @@ function pulse(state, now) {
 
 function updateCaches(state, now, dt) {
   const rng = mkRng(state);
-  const b = zoneBounds(state);
+  const poly = zonePolygon(state);
   for (const c of state.caches) {
     if (c.takenBy && now >= c.respawnAt) {
-      const p = geo.randomPointIn(b, rng);
+      const p = geo.randomPointInPolygon(poly, rng);
       c.lat = p.lat; c.lon = p.lon; c.takenBy = null; c.respawnAt = 0;
     }
     // The collapse can strand a cache outside the zone: pull it back in.
-    if (!c.takenBy && geo.distanceOutside(b, c) > 0) {
-      const p = geo.randomPointIn(b, rng);
+    if (!c.takenBy && !geo.pointInPolygon(poly, c)) {
+      const p = geo.randomPointInPolygon(poly, rng);
       c.lat = p.lat; c.lon = p.lon;
     }
   }

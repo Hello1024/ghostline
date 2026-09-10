@@ -10,7 +10,7 @@
 
 import { PHASE, ROLE } from './constants.js';
 import * as geo from './geo.js';
-import { all, ghosts, hunters, located, zoneBounds } from './state.js';
+import { all, ghosts, hunters, located, zonePolygon } from './state.js';
 import { derivedReveals, isDarkNow } from './engine.js';
 
 /** How close a fellow ghost must be before you sense them. */
@@ -96,7 +96,7 @@ export function viewFor(state, playerId, now = state.t) {
 }
 
 function selfView(state, me, now) {
-  const b = zoneBounds(state);
+  const poly = zonePolygon(state);
   return {
     id: me.id,
     name: me.name,
@@ -123,7 +123,7 @@ function selfView(state, me, now) {
       jumps: me.dark.jumps,
     },
     oobSince: me.oobSince,
-    outsideM: me.lat == null ? 0 : Math.round(geo.distanceOutside(b, me)),
+    outsideM: me.lat == null ? 0 : Math.round(geo.distanceOutsidePolygon(poly, me)),
     wakeLock: me.presence.wakeLock,
   };
 }

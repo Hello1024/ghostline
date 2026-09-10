@@ -68,11 +68,17 @@ export function createGameMap(mapEl, canvasEl, { onPick } = {}) {
     return Math.abs(b.x - a.x);
   }
 
-  function square(centre, sizeM) {
-    const b = geo.squareBounds(centre, sizeM);
-    const tl = pt({ lat: b.maxLat, lon: b.minLon });
-    const br = pt({ lat: b.minLat, lon: b.maxLon });
-    return { x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y };
+  /** Trace a lat/lon ring onto the canvas as a closed path. */
+  function ringPath(poly) {
+    if (!poly || poly.length < 3) return false;
+    ctx.beginPath();
+    poly.forEach((p, i) => {
+      const q = pt(p);
+      if (i === 0) ctx.moveTo(q.x, q.y);
+      else ctx.lineTo(q.x, q.y);
+    });
+    ctx.closePath();
+    return true;
   }
 
   function render() {
@@ -85,27 +91,41 @@ export function createGameMap(mapEl, canvasEl, { onPick } = {}) {
     const now = view.t;
 
     // --- the ground: the full area, and the live zone inside it -----------
-    const area = square(view.area, view.area.sizeM);
-    const zone = square(view.zone, view.zone.sizeM);
+    const areaRing = view.area?.polygon;
+    const zoneRing = view.zone?.polygon;
 
-    ctx.save();
-    // Everything outside the live zone is off limits: wash it out.
-    ctx.beginPath();
-    ctx.rect(0, 0, w, h);
-    ctx.rect(zone.x, zone.y, zone.w, zone.h);
-    ctx.fillStyle = 'rgba(255,77,109,.10)';
-    ctx.fill('evenodd');
-    ctx.restore();
+    if (zoneRing?.length >= 3) {
+      // Everything outside the live zone is off limits: wash it out. The
+      // even-odd rule punches the playable shape out of a full-screen fill,
+      // which works for any polygon, concave ones included.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, w, h);
+      zoneRing.forEach((p, i) => {
+        const q = pt(p);
+        if (i === 0) ctx.moveTo(q.x, q.y);
+        else ctx.lineTo(q.x, q.y);
+      });
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,77,109,.10)';
+      ctx.fill('evenodd');
+      ctx.restore();
+    }
 
-    ctx.setLineDash([6, 6]);
-    ctx.strokeStyle = 'rgba(148,160,184,.55)';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(area.x, area.y, area.w, area.h);
-    ctx.setLineDash([]);
+    // The original area, once the zone has shrunk away from it.
+    if (areaRing?.length >= 3 && view.zone?.scale < 0.999 && ringPath(areaRing)) {
+      ctx.setLineDash([6, 6]);
+      ctx.strokeStyle = 'rgba(148,160,184,.5)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
-    ctx.strokeStyle = '#37e2c8';
-    ctx.lineWidth = 2.5;
-    ctx.strokeRect(zone.x, zone.y, zone.w, zone.h);
+    if (ringPath(zoneRing)) {
+      ctx.strokeStyle = '#37e2c8';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
 
     // --- caches -----------------------------------------------------------
     for (const c of view.caches) {
@@ -256,8 +276,10 @@ export function createGameMap(mapEl, canvasEl, { onPick } = {}) {
       schedule();
     },
     fitArea(area) {
-      const b = geo.squareBounds(area, area.sizeM * 1.15);
-      map.fitBounds([[b.minLat, b.minLon], [b.maxLat, b.maxLon]], { animate: false });
+      const ring = area?.polygon;
+      if (!ring || ring.length < 3) return;
+      const b = geo.polygonBounds(ring);
+      map.fitBounds([[b.minLat, b.minLon], [b.maxLat, b.maxLon]], { animate: false, padding: [24, 24] });
       following = false;
     },
     recentre() {

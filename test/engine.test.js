@@ -8,9 +8,10 @@ import { makeGame, place, start, run, heartbeat, give, charge, hasFeed, T0, CENT
 
 test('a match will not start without an area, a hunter and a ghost', () => {
   const s = makeGame({ players: ['h1', 'g1'], roles: { h1: 'hunter', g1: 'ghost' } });
-  s.area.lat = 0; s.area.lon = 0;
+  const ring = s.area.polygon;
+  s.area = { polygon: [], lat: 0, lon: 0, sizeM: 0, areaM2: 0 };
   assert.equal(applyIntent(s, 'h1', { type: 'start' }, T0).error, 'no-area');
-  s.area = { ...CENTRE, sizeM: 1609 };
+  s.area = { ...s.area, polygon: ring, lat: CENTRE.lat, lon: CENTRE.lon, sizeM: 1609 };
   s.players.g1.role = 'hunter';
   assert.equal(applyIntent(s, 'h1', { type: 'start' }, T0).error, 'need-a-ghost');
   s.players.g1.role = 'ghost';

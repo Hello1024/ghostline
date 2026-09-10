@@ -46,15 +46,36 @@ export function createPlayer({ id, name, role = ROLE.GHOST, now = 0 }) {
  * @param {{seed?:string|number, area:{lat:number,lon:number}, config?:object,
  *          hostId?:string, now?:number, code?:string}} opts
  */
+/**
+ * Summarise a ring for everything that wants a single point or size: map
+ * fitting, zoom, the bot's sense of "roughly how big is this". `sizeM` is the
+ * side of a square of the same area, so it stays meaningful for any shape.
+ */
+export function shapeFrom(polygon) {
+  const ring = (polygon || []).filter((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lon));
+  if (ring.length < 3) return { polygon: ring, lat: 0, lon: 0, sizeM: 0, areaM2: 0 };
+  const centre = geo.polygonCentroid(ring);
+  const areaM2 = geo.polygonArea(ring);
+  return {
+    polygon: ring.map((p) => ({ lat: p.lat, lon: p.lon })),
+    lat: centre.lat,
+    lon: centre.lon,
+    sizeM: Math.sqrt(areaM2),
+    areaM2,
+  };
+}
+
 export function createGame(opts = {}) {
   const now = opts.now ?? Date.now();
   const config = normaliseConfig(opts.config);
   const seed = typeof opts.seed === 'string' ? hashSeed(opts.seed) : (opts.seed ?? 0x9e3779b9);
-  const area = {
-    lat: opts.area?.lat ?? 0,
-    lon: opts.area?.lon ?? 0,
-    sizeM: config.areaSizeM,
-  };
+  // A play area is a polygon. When only a centre is given we start from a
+  // square of the configured size, which the host can then reshape.
+  const centre = { lat: opts.area?.lat ?? 0, lon: opts.area?.lon ?? 0 };
+  const ring = opts.area?.polygon?.length >= 3
+    ? opts.area.polygon
+    : geo.squarePolygon(centre, opts.area?.sizeM || config.areaSizeM);
+  const area = shapeFrom(ring);
   return {
     v: 1,
     code: opts.code || '----',
@@ -70,7 +91,7 @@ export function createGame(opts = {}) {
     hostId: opts.hostId || null,
     config,
     area,
-    zone: { ...area },
+    zone: { ...area, scale: 1 },
     start: null,          // where the hunters are held during scatter
     players: {},
     caches: [],
@@ -99,12 +120,15 @@ export function addPlayer(state, { id, name, role }) {
   return p;
 }
 
+export const zonePolygon = (state) => state.zone.polygon;
+export const areaPolygon = (state) => state.area.polygon;
+
 export function zoneBounds(state) {
-  return geo.squareBounds({ lat: state.zone.lat, lon: state.zone.lon }, state.zone.sizeM);
+  return geo.polygonBounds(state.zone.polygon);
 }
 
 export function areaBounds(state) {
-  return geo.squareBounds({ lat: state.area.lat, lon: state.area.lon }, state.area.sizeM);
+  return geo.polygonBounds(state.area.polygon);
 }
 
 export const all = (state) => Object.values(state.players);
@@ -136,10 +160,10 @@ export function assignRoles(state, hunterCount) {
 /** Fill the field with caches at random points inside the current zone. */
 export function spawnCaches(state) {
   const rng = mkRng(state);
-  const b = zoneBounds(state);
+  const poly = zonePolygon(state);
   state.caches = [];
   for (let i = 0; i < state.config.cacheCount; i++) {
-    const p = geo.randomPointIn(b, rng);
+    const p = geo.randomPointInPolygon(poly, rng);
     state.caches.push({ id: `c${state.nextId++}`, lat: p.lat, lon: p.lon, takenBy: null, respawnAt: 0 });
   }
   return state.caches;

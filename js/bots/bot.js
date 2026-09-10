@@ -38,16 +38,17 @@ export function decide(view, brain, rng, now, dt = 0.5) {
   if (!view || !view.me || view.me.lat == null) return { target: null, speed: 0, use: null };
   const me = view.me;
   brain.stamina = Math.min(1, brain.stamina + dt / 90);   // recover while walking
-  const zone = geo.squareBounds({ lat: view.zone.lat, lon: view.zone.lon }, view.zone.sizeM);
+  const zone = view.zone.polygon;
   const centre = { lat: view.zone.lat, lon: view.zone.lon };
-  const inset = (b, f) => ({
-    minLat: b.minLat + (b.maxLat - b.minLat) * f, maxLat: b.maxLat - (b.maxLat - b.minLat) * f,
-    minLon: b.minLon + (b.maxLon - b.minLon) * f, maxLon: b.maxLon - (b.maxLon - b.minLon) * f,
-  });
+  // Pull the ring in by a fraction, so bots aim for open ground rather than
+  // hugging a boundary they will be penalised for crossing. `f` is measured
+  // per edge, as it was when this was a bounding box, so the numbers below
+  // still mean what they meant when the balance was tuned against them.
+  const inset = (f) => geo.scalePolygon(zone, Math.max(0.05, 1 - 2 * f), centre);
 
   // Anyone outside the shrinking zone has exactly one job.
   if (me.outsideM > 0) {
-    brain.target = geo.randomPointIn(inset(zone, 0.25), rng);
+    brain.target = geo.randomPointInPolygon(inset(0.25), rng);
     brain.commitUntil = now + 20000;
     return { target: brain.target, speed: RUN, use: null };
   }
@@ -70,7 +71,12 @@ export function decide(view, brain, rng, now, dt = 0.5) {
       const from = view.start || centre;
       const away = geo.bearing(from, me) + (rng() - 0.5) * 120;
       const reach = (view.zone.sizeM / 2) * (0.55 + rng() * 0.4);
-      brain.scatterTarget = geo.clampToBounds(inset(zone, 0.06), geo.destination(from, away, reach));
+      const aim = geo.destination(from, away, reach);
+      const playable = inset(0.06);
+      // If that heading leaves the ground, take the nearest legal spot instead.
+      brain.scatterTarget = geo.pointInPolygon(playable, aim)
+        ? aim
+        : (geo.nearestPointOnPolygon(playable, aim) || geo.randomPointInPolygon(playable, rng));
     }
     return { target: brain.scatterTarget, speed: sprint(brain, dt), use: ghostItem(view, brain, rng, now) };
   }
@@ -124,7 +130,7 @@ export function decide(view, brain, rng, now, dt = 0.5) {
       speed = sprint(brain, dt);
     } else if (now - (view.pulse.lastAt || 0) < 4000) {
       // Just been pinged — move, the blob is only as stale as you let it be.
-      brain.target = geo.randomPointIn(inset(zone, 0.1), rng);
+      brain.target = geo.randomPointInPolygon(inset(0.1), rng);
       brain.commitUntil = now + 30000;
       target = brain.target;
       speed = RUN;
@@ -153,7 +159,7 @@ export function decide(view, brain, rng, now, dt = 0.5) {
   }
 
   if (!target || now > brain.commitUntil) {
-    brain.target = geo.randomPointIn(inset(zone, view.me.role === ROLE.GHOST ? 0.08 : 0.02), rng);
+    brain.target = geo.randomPointInPolygon(inset(view.me.role === ROLE.GHOST ? 0.08 : 0.02), rng);
     brain.commitUntil = now + 60000;
     target = brain.target;
   }

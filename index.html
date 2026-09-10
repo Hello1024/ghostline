@@ -28,6 +28,7 @@
     <button class="btn" id="btn-join">Join with a code</button>
     <button class="btn ghost" id="btn-practice">Practice against bots</button>
     <button class="btn quiet" id="btn-rules">How to play</button>
+    <button class="btn quiet" id="btn-net">Connection settings</button>
   </div>
   <p class="footnote" id="home-note"></p>
 </section>
@@ -78,17 +79,46 @@
   </div>
 </section>
 
+<!-- ────────────────────────── connection ────────────────────────── -->
+<section class="screen" id="screen-net" data-screen="net" hidden>
+  <header class="bar"><button class="btn icon" data-back>←</button><h2>Connection</h2></header>
+  <div class="scroll pad prose">
+    <p>Phones connect directly to each other. On the same wifi that always works. Across
+      networks — one on mobile data, one at home — they need a little help finding a route.</p>
+    <button class="btn" id="btn-test-ice">Test this device's connectivity</button>
+    <pre class="result" id="ice-result" hidden></pre>
+
+    <h3>Relay server (optional)</h3>
+    <p>Some mobile networks will not allow a direct connection at all. A TURN relay fixes that.
+      There is no free public one worth relying on, so if you hit this you will need your own —
+      a free tier from a TURN provider, or your own <code>coturn</code>. Whoever hosts the game
+      should set it; everyone else can leave it blank.</p>
+    <label class="field"><span>TURN URL</span>
+      <input type="text" id="turn-url" placeholder="turn:example.com:3478" autocapitalize="off" spellcheck="false"></label>
+    <label class="field"><span>Username</span>
+      <input type="text" id="turn-user" autocapitalize="off" spellcheck="false"></label>
+    <label class="field"><span>Password</span>
+      <input type="text" id="turn-pass" autocapitalize="off" spellcheck="false"></label>
+    <button class="btn primary" id="btn-save-turn">Save</button>
+    <p class="footnote">Stored only on this device.</p>
+  </div>
+</section>
+
 <!-- ───────────────────────────── create ───────────────────────────── -->
 <section class="screen" id="screen-create" data-screen="create" hidden>
   <header class="bar"><button class="btn icon" data-back>←</button><h2>Choose your ground</h2></header>
   <div class="map-wrap">
     <div id="picker-map" class="map"></div>
-    <div class="picker-overlay"><div class="picker-box" id="picker-box"></div></div>
-    <button class="btn chip locate" id="btn-locate">Use my location</button>
+    <div class="picker-tools">
+      <button class="btn chip" id="btn-locate">My location</button>
+      <button class="btn chip" id="btn-undo-corner">Undo corner</button>
+      <button class="btn chip" id="btn-reset-square">Reset to square</button>
+    </div>
   </div>
   <div class="panel">
+    <p class="readout" id="area-readout">Tap the map to shape the boundary. Drag a corner to move it, tap one to remove it.</p>
     <label class="field">
-      <span>Play area <b id="area-label">1.0 miles</b> across</span>
+      <span>Square size <b id="area-label">1.0 miles</b> across</span>
       <input type="range" id="area-size" min="400" max="4000" step="100" value="1609">
     </label>
     <div class="grid2">
@@ -166,6 +196,7 @@
 
   <div class="hud-side">
     <button class="btn icon" id="btn-recentre" title="Centre on me">◎</button>
+    <button class="btn icon" id="btn-fitarea" title="Show the whole area">⤢</button>
     <button class="btn icon" id="btn-menu" title="Menu">⋯</button>
   </div>
 

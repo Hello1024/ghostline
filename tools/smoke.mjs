@@ -76,6 +76,48 @@ try {
   await page.screenshot({ path: join(SHOTS, '2-rules.png') });
   await page.click('#screen-rules [data-back]');
 
+  note('drawing a play area');
+  await page.click('#btn-create');
+  await page.waitForSelector('#screen-create:not([hidden])', { timeout: 5000 });
+  await new Promise((r) => setTimeout(r, 2000));
+  const areaLayer = await page.evaluate(() => {
+    const svg = document.querySelector('#picker-map svg.leaflet-zoom-animated path');
+    if (!svg) return { drawn: false };
+    const r = svg.getBoundingClientRect();
+    const mid = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    const top = document.elementFromPoint(mid.x, mid.y);
+    return {
+      drawn: r.width > 20 && r.height > 20,
+      w: Math.round(r.width), h: Math.round(r.height),
+      // What is painted over the middle of the area? Tiles would mean the
+      // play area is buried again.
+      topTag: top ? (top.tagName + '.' + (top.getAttribute('class') || '')) : null,
+      handles: document.querySelectorAll('.corner-handle').length,
+      readout: document.getElementById('area-readout').textContent.trim(),
+    };
+  });
+  note(`area layer ${areaLayer.w}x${areaLayer.h}, ${areaLayer.handles} handles, over it: ${areaLayer.topTag}`);
+  note(`readout: ${areaLayer.readout}`);
+  if (!areaLayer.drawn) problems.push('the play area is not drawn on the map');
+  if (areaLayer.handles !== 4) problems.push(`expected four corner handles, saw ${areaLayer.handles}`);
+  if (/leaflet-tile/.test(areaLayer.topTag || '')) problems.push('map tiles are painted over the play area');
+  if (!/km²/.test(areaLayer.readout)) problems.push('no area readout');
+  await page.screenshot({ path: join(SHOTS, '6-area.png') });
+
+  note('adding a corner by tapping the map');
+  const mapBox = await (await page.$('#picker-map')).boundingBox();
+  await page.mouse.click(mapBox.x + mapBox.width * 0.22, mapBox.y + mapBox.height * 0.3);
+  await new Promise((r) => setTimeout(r, 600));
+  const afterTap = await page.evaluate(() => ({
+    handles: document.querySelectorAll('.corner-handle').length,
+    readout: document.getElementById('area-readout').textContent.trim(),
+  }));
+  note(`after tapping: ${afterTap.handles} handles — ${afterTap.readout}`);
+  if (afterTap.handles !== 5) problems.push(`tapping the map did not add a corner (${afterTap.handles} handles)`);
+  await page.screenshot({ path: join(SHOTS, '7-area-edited.png') });
+  await page.click('#screen-create [data-back]');
+  await page.waitForSelector('#screen-home:not([hidden])', { timeout: 5000 });
+
   note('starting a practice match');
   await page.click('#btn-practice');
   await page.waitForSelector('#screen-lobby:not([hidden])', { timeout: 10000 });
@@ -140,6 +182,24 @@ try {
   if (!(km > 0)) problems.push('walking recorded no distance');
 
   await page.screenshot({ path: join(SHOTS, '4-game.png') });
+
+  note('showing the whole play area on the game map');
+  await page.click('#btn-fitarea');
+  await new Promise((r) => setTimeout(r, 1200));
+  const boundary = await page.evaluate(() => {
+    const c = document.getElementById('overlay');
+    const ctx = c.getContext('2d');
+    const { data } = ctx.getImageData(0, 0, c.width, c.height);
+    // The zone outline is drawn in the accent teal; count pixels close to it.
+    let edge = 0;
+    for (let i = 0; i < data.length; i += 4 * 13) {
+      if (data[i] < 90 && data[i + 1] > 170 && data[i + 2] > 150 && data[i + 3] > 120) edge++;
+    }
+    return edge;
+  });
+  note(`boundary pixels drawn on the game map: ${boundary}`);
+  if (boundary < 30) problems.push('the play area boundary is not drawn on the game map');
+  await page.screenshot({ path: join(SHOTS, '8-area-ingame.png') });
 
   note('opening the match sheet');
   await page.click('#btn-menu');

@@ -81,9 +81,13 @@ test('a hostile config patch cannot escape its bounds', () => {
 test('an area sent over the wire is clamped to a playable size', () => {
   const s = makeGame();
   applyIntent(s, 'h1', { type: 'area', lat: 51.5, lon: -0.1, sizeM: 1e7 }, T0);
-  assert.ok(s.area.sizeM <= 4000, `area ${s.area.sizeM}`);
+  // sizeM is derived from the polygon's true area, so a square comes back a
+  // few centimetres under its nominal side. Compare with that in mind.
+  assert.ok(s.area.sizeM <= 4001, `area ${s.area.sizeM}`);
+  assert.ok(s.area.sizeM > 3990, `area ${s.area.sizeM}`);
   applyIntent(s, 'h1', { type: 'area', lat: 51.5, lon: -0.1, sizeM: 1 }, T0);
-  assert.ok(s.area.sizeM >= 400);
+  assert.ok(s.area.sizeM >= 399, `area ${s.area.sizeM}`);
+  assert.equal(s.area.polygon.length, 4);
 });
 
 test('a player cannot spend an item they do not hold, however hard they try', () => {

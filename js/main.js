@@ -19,7 +19,9 @@ import { createLocalPair } from './net/transport-local.js';
 import { createPeerHost, createPeerClient } from './net/transport-peer.js';
 import { createGpsLocator, createSimLocator } from './geo/locator.js';
 import { createPresence } from './geo/presence.js';
-import { createGameMap, createPickerMap } from './ui/map.js';
+import { createGameMap } from './ui/map.js';
+import { createAreaPicker, describeArea } from './ui/areapicker.js';
+import { iceServers, savedTurn, saveTurn } from './net/transport-peer.js';
 import { createHud, renderScoreboard, escapeHtml, mmss } from './ui/hud.js';
 import { newBrain, decide, walk } from './bots/bot.js';
 
@@ -42,7 +44,7 @@ const app = {
   picker: null,
   pickFor: null,
   loop: null,
-  area: { ...LONDON, sizeM: 1609 },
+  areaRing: null,          // the play area, as a ring of {lat, lon}
 };
 
 // ------------------------------------------------------------- identity --
@@ -64,7 +66,7 @@ function show(name) {
   app.screen = name;
   for (const s of document.querySelectorAll('.screen')) s.hidden = s.dataset.screen !== name;
   if (name === 'game') requestAnimationFrame(() => app.map?.invalidate());
-  if (name === 'create') requestAnimationFrame(() => app.picker?.invalidateSize());
+  if (name === 'create') requestAnimationFrame(() => app.picker?.invalidate());
 }
 
 let toastTimer = null;
@@ -83,30 +85,47 @@ function buzz(pattern) {
 // ----------------------------------------------------------- area picker --
 
 function setupPicker() {
-  if (app.picker) return;
-  app.picker = createPickerMap(el('picker-map'));
-  const redraw = () => {
-    const size = Number(el('area-size').value);
-    const centre = app.picker.getCenter();
-    app.area = { lat: centre.lat, lon: centre.lng, sizeM: size };
-    // Show the square at true scale by measuring it in screen pixels.
-    const b = geo.squareBounds(app.area, size);
-    const tl = app.picker.latLngToContainerPoint([b.maxLat, b.minLon]);
-    const br = app.picker.latLngToContainerPoint([b.minLat, b.maxLon]);
-    const box = el('picker-box');
-    box.style.width = `${Math.max(8, br.x - tl.x)}px`;
-    box.style.height = `${Math.max(8, br.y - tl.y)}px`;
+  if (app.picker) { app.picker.invalidate(); return; }
+
+  app.picker = createAreaPicker(el('picker-map'), {
+    onChange: (info) => {
+      app.areaRing = info.ring;
+      const readout = el('area-readout');
+      const size = describeArea(info.areaM2);
+      if (info.problem) {
+        readout.className = 'readout bad';
+        readout.textContent = {
+          'area-too-small': `Too small to hide in — ${size}. Make it bigger.`,
+          'area-too-big': `Too big to walk — ${size}. Make it smaller.`,
+          'area-crosses-itself': 'The boundary crosses itself. Move a corner.',
+          'too-many-corners': 'That is too many corners.',
+          'bad-area': 'Tap the map to place at least three corners.',
+        }[info.problem] || 'That shape will not work.';
+      } else {
+        readout.className = 'readout';
+        readout.textContent = `${size} · ${info.corners} corners · ${(info.perimeterM / 1000).toFixed(2)} km to walk round`;
+      }
+      el('btn-open-lobby').disabled = !!info.problem;
+    },
+  });
+  requestAnimationFrame(() => app.picker.invalidate());
+
+  el('area-size').addEventListener('input', (e) => {
+    const size = Number(e.target.value);
     el('area-label').textContent = `${(size / 1609.34).toFixed(1)} miles`;
-  };
-  app.picker.on('move zoom resize', redraw);
-  el('area-size').addEventListener('input', redraw);
-  requestAnimationFrame(() => { app.picker.invalidateSize(); redraw(); });
+    app.picker.setSize(size);
+  });
+  el('btn-undo-corner').addEventListener('click', () => app.picker.undo());
+  el('btn-reset-square').addEventListener('click', () => {
+    app.picker.resetToSquare();
+    toast('Back to a square');
+  });
 
   el('btn-locate').addEventListener('click', () => {
     if (!navigator.geolocation) return toast('No location services on this device.');
     toast('Finding you…');
     navigator.geolocation.getCurrentPosition(
-      (pos) => { app.picker.setView([pos.coords.latitude, pos.coords.longitude], 15); redraw(); },
+      (pos) => app.picker.centreOn(pos.coords.latitude, pos.coords.longitude, 15),
       () => toast('Could not get a fix. Pan the map instead.'),
       { enableHighAccuracy: true, timeout: 10000 },
     );
@@ -122,6 +141,13 @@ function setupPicker() {
   bind('scatter', 'scatter-label', (v) => (v ? `${Math.round(v / 60)} min` : 'none'));
   bind('pulse', 'pulse-label', (v) => `${v}s`);
   bind('hunters', 'hunters-label', (v) => String(v));
+}
+
+/** The ring to play on, falling back to a default square. */
+function playArea() {
+  return app.areaRing?.length >= 3
+    ? app.areaRing
+    : geo.squarePolygon(LONDON, 1609);
 }
 
 function chosenConfig() {
@@ -165,8 +191,8 @@ async function startHosting() {
   const code = lobbyCode(seedRng);
   const state = createGame({
     seed: `${code}-${Date.now()}`,
-    area: app.area,
-    config: { ...chosenConfig(), areaSizeM: app.area.sizeM },
+    area: { polygon: playArea() },
+    config: chosenConfig(),
     hostId: playerId(),
     code,
   });
@@ -230,7 +256,7 @@ function startPractice() {
   const code = 'SOLO';
   const state = createGame({
     seed: `solo-${Date.now()}`,
-    area: app.area.lat ? app.area : { ...LONDON, sizeM: 1609 },
+    area: { polygon: playArea() },
     config: { ...chosenConfig(), scatterS: 60, durationS: 900 },
     hostId: playerId(),
     code,
@@ -414,7 +440,7 @@ function startSensors() {
   const onFix = (fix) => app.session?.send({ type: 'fix', ...fix });
 
   if (sim) {
-    const centre = app.state?.start || app.state?.area || app.area;
+    const centre = app.state?.start || app.state?.area || { lat: LONDON.lat, lon: LONDON.lon };
     app.locator = createSimLocator({ onFix, start: geo.jitter(centre, 30, mkRng({ rngState: 1234 })) });
     setupStick(app.locator);
     el('sim-stick').hidden = false;
@@ -520,6 +546,7 @@ function wire() {
   el('btn-join').addEventListener('click', () => { el('join-name').value = savedName(); show('join'); });
   el('btn-practice').addEventListener('click', () => { setupPicker(); startPractice(); });
   el('btn-rules').addEventListener('click', () => show('rules'));
+  el('btn-net').addEventListener('click', () => show('net'));
   for (const b of document.querySelectorAll('[data-back]')) {
     b.addEventListener('click', () => (app.session ? goHome() : show('home')));
   }
@@ -557,8 +584,15 @@ function wire() {
   });
 
   el('btn-recentre').addEventListener('click', () => app.map?.recentre());
+  el('btn-fitarea').addEventListener('click', () => {
+    if (!app.view?.area) return;
+    app.map?.fitArea(app.view.area);
+    toast('The whole play area');
+  });
   el('btn-menu').addEventListener('click', openMenu);
   el('sheet-close').addEventListener('click', () => { el('sheet').hidden = true; });
+
+  wireNetScreen();
 
   const params = new URLSearchParams(location.search);
   const code = params.get('join');
@@ -584,6 +618,86 @@ function reallyStart() {
   buzz([60, 40, 60]);
 }
 
+// ----------------------------------------------------------- connection --
+
+function wireNetScreen() {
+  const turn = savedTurn();
+  if (turn) {
+    el('turn-url').value = turn.urls;
+    el('turn-user').value = turn.username;
+    el('turn-pass').value = turn.credential;
+  }
+  el('btn-save-turn').addEventListener('click', () => {
+    const urls = el('turn-url').value.trim();
+    if (urls && !/^turns?:/i.test(urls)) {
+      toast('A TURN URL starts with turn: or turns:');
+      return;
+    }
+    saveTurn(urls ? { urls, username: el('turn-user').value.trim(), credential: el('turn-pass').value.trim() } : null);
+    toast(urls ? 'Relay saved — it applies to the next game you start or join' : 'Relay cleared');
+  });
+  el('btn-test-ice').addEventListener('click', testConnectivity);
+}
+
+/**
+ * Gather ICE candidates and say, in plain words, what this device can reach.
+ * "It doesn't connect" is a miserable thing to debug from a car park, so the
+ * app should be able to answer it on its own.
+ */
+async function testConnectivity() {
+  const out = el('ice-result');
+  out.hidden = false;
+  out.textContent = 'Testing…';
+  if (typeof RTCPeerConnection !== 'function') {
+    out.textContent = 'This browser cannot do peer-to-peer connections at all.';
+    return;
+  }
+  const servers = iceServers();
+  const types = new Set();
+  const errors = new Set();
+  let pc;
+  try {
+    pc = new RTCPeerConnection({ iceServers: servers });
+    pc.createDataChannel('probe');
+    pc.onicecandidate = (e) => {
+      const m = e.candidate && /typ (\w+)/.exec(e.candidate.candidate);
+      if (m) types.add(m[1]);
+    };
+    pc.onicecandidateerror = (e) => {
+      if (e.errorCode !== 701 || e.url) errors.add(`${e.url || 'server'}: ${e.errorCode}`);
+    };
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise((done) => {
+      const timer = setTimeout(done, 12000);
+      pc.onicegatheringstatechange = () => {
+        if (pc.iceGatheringState === 'complete') { clearTimeout(timer); done(); }
+      };
+    });
+  } catch (err) {
+    out.textContent = `Could not test: ${err.message}`;
+    return;
+  } finally {
+    try { pc?.close(); } catch { /* nothing to close */ }
+  }
+
+  const hasTurn = servers.some((sv) => /^turns?:/i.test([].concat(sv.urls)[0] || ''));
+  const lines = [
+    `This network        ${types.has('host') ? 'reachable' : 'NOT reachable'}`,
+    `Public address      ${types.has('srflx') ? 'found — other networks can reach you' : 'NOT found — you may only manage same-wifi games'}`,
+    `Relay               ${types.has('relay') ? 'working' : (hasTurn ? 'configured but NOT working' : 'not configured')}`,
+  ];
+  if (!types.has('srflx')) {
+    lines.push('', 'A firewall is blocking the address lookup. Try mobile data, or a different network.');
+  } else if (!types.has('relay')) {
+    lines.push('', 'Good enough for most networks. If a particular phone still cannot join,',
+      'that network needs a relay — add one above.');
+  } else {
+    lines.push('', 'This device can connect from anywhere.');
+  }
+  if (errors.size) lines.push('', `Servers that did not answer: ${[...errors].join(', ')}`);
+  out.textContent = lines.join('\n');
+}
+
 function openMenu() {
   const view = app.view;
   el('sheet-title').textContent = 'Match';
@@ -593,8 +707,31 @@ function openMenu() {
     <p>Walked <b>${(view.me.distanceM / 1000).toFixed(2)} km</b> · loot <b>${view.me.caches}</b>
        · time in the dark <b>${Math.round(view.me.dark.totalMs / 1000)}s</b></p>
     <p class="footnote">${view.me.wakeLock ? 'The screen is being held awake.' : 'The screen is not being held awake — keep it on.'}</p>
+    <p class="footnote" id="route-line">Checking the connection…</p>
   ` : '';
   el('sheet').hidden = false;
+  describeConnection();
+}
+
+/** How this device is actually talking to the others, in the match menu. */
+async function describeConnection() {
+  const line = el('route-line');
+  if (!line) return;
+  try {
+    if (app.mode === 'practice') { line.textContent = 'Practice match — nothing is going over a network.'; return; }
+    const transport = app.session?.isHost ? app.session.host : null;
+    if (transport) {
+      const peers = app.session.host.connectedPlayers.length;
+      line.textContent = `Hosting — ${peers} ${peers === 1 ? 'player' : 'players'} connected to this device.`;
+      return;
+    }
+    const route = await app.session?.client?.transportRoute?.();
+    line.textContent = route
+      ? `Connection: ${route.route}${route.rttMs != null ? ` · ${route.rttMs}ms` : ''}`
+      : 'Connection: unknown.';
+  } catch {
+    line.textContent = '';
+  }
 }
 
 if ('serviceWorker' in navigator) {

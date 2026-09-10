@@ -63,6 +63,8 @@ export function createClient({ transport, playerId, name, onView, onEvent, clock
     playerId,
     hello,
     send,
+    /** How this connection is routed — for the in-match diagnostics. */
+    transportRoute: () => (typeof transport.route === 'function' ? transport.route() : null),
     get view() { return view; },
     get welcomed() { return welcomed; },
     get rtt() { return rtt; },

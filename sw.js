@@ -37,6 +37,7 @@ const PRECACHE = [
   './js/geo/presence.js',
   './js/ui/hud.js',
   './js/ui/map.js',
+  './js/ui/areapicker.js',
   './js/bots/bot.js',
   './vendor/leaflet/leaflet.js',
   './vendor/leaflet/leaflet.css',

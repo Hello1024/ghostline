@@ -37,6 +37,9 @@ export function runMatch(opts = {}) {
     seed, area, now: t0, hostId: 'p0', code: 'TEST',
     config: { durationS: minutes * 60, ...config },
   });
+  // Bots and caches need somewhere sensible to start when the area is drawn
+  // by hand rather than centred on the spawn point.
+  const startPoint = { lat: state.area.lat, lon: state.area.lon };
   const rng = mkRng({ rngState: 0xC0FFEE }, 'rngState');
 
   for (let i = 0; i < players; i++) {
@@ -46,7 +49,6 @@ export function runMatch(opts = {}) {
 
   const brains = {};
   const pos = {};
-  const startPoint = { ...area };
   for (const p of Object.values(state.players)) {
     brains[p.id] = newBrain(p.id);
     pos[p.id] = geo.jitter(startPoint, startSpreadM, rng);

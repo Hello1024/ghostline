@@ -13,8 +13,13 @@ directly over WebRTC.
 ## The game
 
 A few **hunters** chase everyone else. The **ghosts** just have to still be free when the clock runs
-out. You pick the square on a map before you start; a mile a side suits seven players and thirty
-minutes.
+out.
+
+Before you start, you draw the boundary on a map. It begins as a square — a mile a side suits seven
+players and thirty minutes — and you reshape it by tapping corners in, dragging them about, and
+tapping one to remove it. Real ground has a river down one edge and a dual carriageway across the
+top, so the area is whatever polygon you draw, concave shapes included. The app tells you the area,
+the number of corners, and how far it is to walk round the outside.
 
 ### The pulse
 
@@ -78,11 +83,26 @@ context, so use `localhost` or https.
 
 ```bash
 npm run serve        # http://localhost:8080
-npm test             # 109 tests, no dependencies
+npm test             # 118 tests, no dependencies
 ```
 
 **Deploying:** push to a branch and turn on GitHub Pages. There is no build step — what is in the
 repo is what ships.
+
+### Connecting across networks
+
+Phones talk directly to each other. On one wifi that always works. Across networks — one player on
+mobile data, another at home — WebRTC needs help finding a route, and the app ships a set of public
+STUN servers that were each checked to answer.
+
+STUN is enough for most home routers. Some mobile carriers use a NAT that allows no direct path at
+all, and those need a TURN relay. There is no free public TURN worth relying on any more — the
+well-known open relays now refuse the credentials they publish — so if you hit this, **Connection
+settings** on the home screen takes your own TURN URL and credentials (a provider's free tier, or
+your own `coturn`). Only whoever hosts needs to set it.
+
+That screen also has a **connectivity test** that says, in plain words, what this device can reach.
+Run it before you take seven people outside, not after.
 
 **Practice mode** runs a whole match against six bots inside one phone, with a thumbstick instead
 of GPS. It needs no network at all and is the fastest way to learn the interface before taking
