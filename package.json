@@ -11,7 +11,9 @@
     "balance": "node tools/balance.mjs 20",
     "trace": "node tools/trace.mjs",
     "match": "node test/harness.mjs",
-    "serve": "node tools/serve.mjs"
+    "serve": "node tools/serve.mjs",
+    "smoke": "node tools/smoke.mjs",
+    "multiplayer": "node tools/multiplayer.mjs"
   },
   "engines": {
     "node": ">=20"

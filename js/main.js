@@ -275,8 +275,27 @@ function openLobby(code) {
   renderLobby();
 }
 
+/**
+ * Keep the roster playable. A fresh lobby is all ghosts, which the engine
+ * rightly refuses to start, so pick hunters as soon as there are two people
+ * — and never let a shuffle or a departure leave a side empty.
+ */
+function ensureRolesAssigned(force = false) {
+  const state = app.state;
+  if (!state || !app.session?.isHost || state.phase !== 'lobby') return false;
+  const roster = Object.values(state.players).filter((p) => p.role !== ROLE.SPECTATOR);
+  if (roster.length < 2) return false;
+  const hunters = roster.filter((p) => p.role === ROLE.HUNTER).length;
+  if (!force && hunters > 0 && hunters < roster.length) return false;
+  const wanted = Math.max(1, Math.min(roster.length - 1, Number(el('hunters')?.value) || 2));
+  assignRoles(state, wanted);
+  app.session.host?.broadcastViews();
+  return true;
+}
+
 function renderLobby() {
   if (app.screen !== 'lobby') return;
+  ensureRolesAssigned();
   const view = app.session?.view;
   const players = view?.players ?? [];
   el('lobby-roster').innerHTML = players.map((p) => `
@@ -340,6 +359,9 @@ function useItem(id) {
 
 let lastProximity = 'none';
 function onViewArrived(view) {
+  // For a guest this is the only heartbeat there is: the lobby, and the moment
+  // the match starts, both arrive as views pushed by the host.
+  if (app.screen === 'lobby') renderLobby();
   // A cue you can feel through a pocket — the one thing the screen can't do.
   if (view.proximity.level !== lastProximity && view.phase !== 'scatter') {
     if (view.proximity.level === 'contact') buzz([60, 40, 60, 40, 120]);
@@ -516,10 +538,9 @@ function wire() {
   });
 
   el('btn-shuffle').addEventListener('click', () => {
-    if (!app.state) return;
-    assignRoles(app.state, Number(el('hunters').value) || 2);
-    app.session.host.broadcastViews();
+    if (!ensureRolesAssigned(true)) return;
     renderLobby();
+    toast('Roles re-rolled');
   });
 
   el('btn-start').addEventListener('click', () => {
@@ -552,6 +573,7 @@ function wire() {
 }
 
 function reallyStart() {
+  ensureRolesAssigned();
   const r = app.session.send({ type: 'start' });
   if (r && r.ok === false) {
     toast(String(r.error).replace(/-/g, ' '));

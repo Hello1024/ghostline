@@ -126,13 +126,23 @@ npm test                       # unit, integration, fuzz, PWA integrity
 npm run balance -- 40          # play 40 bot matches, report the outcome spread
 npm run trace                  # one match, minute by minute
 npm run match -- --minutes 30  # a single match with a scoreboard
-node tools/smoke.mjs           # drives a real Chrome (needs puppeteer-core)
+
+# these two drive a real Chrome, and need: npm i --no-save puppeteer-core
+npm run smoke                  # load, lobby, start, walk, HUD
+npm run multiplayer            # two browsers, real WebRTC, one real match
 ```
 
 The suite covers the geodesy against real-world distances, every rule in the engine, the blackout
 ledger, fog-of-war leaks, determinism and replay, 20,000 rounds of hostile input, whole bot matches
 including a twelve-player game, the wire protocol, reconnection, and the PWA's own integrity (a
 precached path that no longer exists is the classic silent deploy failure).
+
+The two browser tests earn their keep. Between them they caught an invisible
+full-screen overlay that was swallowing every tap on the game screen, a toast
+that covered the start button, a thumbstick that threw on desktop, a charge
+readout clipped by its own container, and — the worst of them — a networked
+lobby that could never start a match, because roles were only ever assigned in
+practice mode. None of those would have failed a unit test.
 
 `tools/balance.mjs` is how the numbers above were chosen. Bots are poor hiders and worse searchers,
 so treat it as a floor rather than a forecast — but it is very good at catching runaway dynamics.
