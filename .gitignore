@@ -1,4 +1,6 @@
-node_modules/
-.smoke/
+# A symlink is a file, not a directory: no trailing slashes here, or an
+# out-of-tree node_modules link slips through and breaks the Pages upload.
+node_modules
+.smoke
 *.log
 .DS_Store
